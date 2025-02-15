@@ -33,8 +33,9 @@ class ReactiveFollowGap(Node):
 
         self.moving_avg_window = 3
         self.max_dist = 10.0 # meters
-        self.bubble_radius = 20 # indices in ranges array
-        self.min_obs_dist_threshold = 2.5 # meters
+        self.bubble_radius = 80 # indices in ranges array
+        self.min_obs_dist_threshold = 2.0 # meters
+        self.disparity_threshold = 0.6 # meters
 
         self.front_view_start_idx = None
         self.front_view_end_idx = None
@@ -58,13 +59,13 @@ class ReactiveFollowGap(Node):
         """ Simple mapping between steering angle and velocity
         """
         # Convert steering angle to safe speed
-        curr_velocity = 3.0
+        curr_velocity = 5.0
         if np.abs(angle) < np.radians(10):
-            curr_velocity = 3.0
+            curr_velocity = 4.0
         elif np.abs(angle) < np.radians(20):
-            curr_velocity = 2.0
+            curr_velocity = 3.0
         else:
-            curr_velocity = 1.0
+            curr_velocity = 2.0
         return curr_velocity
     
     
@@ -125,7 +126,25 @@ class ReactiveFollowGap(Node):
         Return index of best point in ranges
 	    Naive: Choose the furthest point within ranges and go there
         """
-        return np.argmax(ranges[start_i:end_i+1]) + start_i
+        # return np.argmax(ranges[start_i:end_i+1]) + start_i
+        # Go towards the center of the gap
+        return (start_i + end_i) // 2
+    
+
+    def disparity_extending(self, ranges):
+        """
+        Find all the disparity in the ranges and create a bubble around it
+        to extend the corner reading.
+        There is a disparity at point i if |ranges[i] - ranges[i-1]| > disparity_threshold.
+        """
+        virtual_ranges = ranges.copy()
+        for i in range(self.front_view_start_idx+1, self.front_view_end_idx):
+            if np.abs(ranges[i] - ranges[i-1]) > self.disparity_threshold:
+                virtual_val = min(ranges[i], ranges[i-1])
+                for j in range(i-self.bubble_radius, i+self.bubble_radius):
+                    if j >= 0 and j < len(virtual_ranges):
+                        virtual_ranges[j] = min(ranges[j], virtual_val)
+        return virtual_ranges
 
 
     def lidar_callback(self, data):
@@ -134,29 +153,32 @@ class ReactiveFollowGap(Node):
         ranges = data.ranges
         proc_ranges = self.preprocess_lidar(ranges)
 
-        self.front_view_start_idx = self.angle_to_index(-np.pi/2, data)
-        self.front_view_end_idx = self.angle_to_index(np.pi/2, data)
+        self.front_view_start_idx = self.angle_to_index(-np.radians(90), data)
+        self.front_view_end_idx = self.angle_to_index(np.radians(90), data)
+
+        # Extend disparities
+        virtual_ranges = self.disparity_extending(proc_ranges)
         
         # Find closest point to LiDAR - minimum non-zero value
         min_index = self.front_view_start_idx
-        min_value = proc_ranges[min_index]
+        min_value = virtual_ranges[self.front_view_start_idx]
         for i in range(self.front_view_start_idx, self.front_view_end_idx):
-            if proc_ranges[i] < min_value and proc_ranges[i] > 0:
-                min_value = proc_ranges[i]
+            if virtual_ranges[i] < min_value:
+                min_value = virtual_ranges[i]
                 min_index = i
 
         angle = 0.0
         velocity = self.steering_angle_to_velocity_mapping(angle)
         if min_value != self.max_dist:
             for i in range(min_index-self.bubble_radius, min_index+self.bubble_radius):
-                if i >= 0 and i < len(proc_ranges):
-                    proc_ranges[i] = 0.0
+                if i >= 0 and i < len(virtual_ranges):
+                    virtual_ranges[i] = 0.0
 
             #Find max length gap
-            start_i, end_i = self.find_max_gap(proc_ranges)
+            start_i, end_i = self.find_max_gap(virtual_ranges)
 
             #Find the best point in the gap
-            best_index = self.find_best_point(start_i, end_i, proc_ranges)
+            best_index = self.find_best_point(start_i, end_i, virtual_ranges)
 
             # Choose steering angle and velocity
             angle = self.range_index_to_angle(best_index, data)

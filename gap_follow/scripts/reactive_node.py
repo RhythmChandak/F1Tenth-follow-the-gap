@@ -31,10 +31,12 @@ class ReactiveFollowGap(Node):
             10
         )
 
-        self.moving_avg_window = 3
+        self.moving_avg_window = 1
         self.max_dist = 5.0 # meters
+        self.car_length = 0.50 # meters
+        self.car_width = 0.25 # meters
         self.bubble_radius = 0.20 # meters
-        self.min_obs_dist_threshold = 2.0 # meters
+        self.min_obs_dist_threshold = 1.5 # meters
         self.disparity_threshold = 0.5 # meters
 
         self.front_view_start_idx = None
@@ -43,7 +45,7 @@ class ReactiveFollowGap(Node):
         self.angle_min = None
 
         # For debugging
-        self.last_printed_angle = 0.0
+        self.last_printed_angle = -10.0
         self.should_print = False
 
 
@@ -67,11 +69,11 @@ class ReactiveFollowGap(Node):
         # Convert steering angle to safe speed
         curr_velocity = 1.2
         if np.abs(angle) < np.radians(10):
-            curr_velocity = 1.1
+            curr_velocity = 1.0
         elif np.abs(angle) < np.radians(20):
-            curr_velocity = 1.1
+            curr_velocity = 0.6
         else:
-            curr_velocity = 1.1
+            curr_velocity = 0.3
         return curr_velocity
     
     
@@ -79,7 +81,7 @@ class ReactiveFollowGap(Node):
         """ Convert a LiDAR angle to a steering angle
         """
         # As need to map lidar angle from -90 to 90 to steering angle from -45 to 45.
-        return lidar_angle / 2.0
+        return lidar_angle #/ 2.0
 
 
     def preprocess_lidar(self, ranges):
@@ -127,6 +129,51 @@ class ReactiveFollowGap(Node):
                     ranges[i] = 0.0
 
 
+    def find_deepest_valid_gap(self, free_space_ranges):
+        """
+        Return the start index & end index of the deepest gap in free_space_ranges
+        """
+        max_gap_depth = 0
+        start_i = self.front_view_start_idx
+        end_i = self.front_view_start_idx
+        gap_length = 0
+        gap_depth = 0
+        gap_min_depth = 1000
+        for i in range(self.front_view_start_idx, self.front_view_end_idx):
+            if free_space_ranges[i] > self.min_obs_dist_threshold:
+                gap_length += 1
+                gap_depth += free_space_ranges[i]
+                gap_min_depth = min(gap_min_depth, free_space_ranges[i])
+            else:
+                gap_width = gap_length * gap_min_depth * self.angle_increment # r* theta
+                if gap_width > 0.8*self.car_width:
+                    # Valid gap
+                    gap_depth = gap_depth / gap_length # mean gap depth - measure of depth of a gap
+                    if self.should_print:
+                        print(f"Gap Depth: {gap_depth}, Gap Length: {gap_length}, Gap Min Depth: {gap_min_depth}")
+
+                    # Compare with existing max gap
+                    if gap_depth > max_gap_depth:
+                        max_gap_depth = gap_depth
+                        start_i = i - gap_length
+                        end_i = i
+                gap_length = 0
+                gap_depth = 0
+                gap_min_depth = 1000
+
+        # Check the last gap
+        if gap_length > 0:
+            gap_width = gap_length * gap_min_depth * self.angle_increment
+            if gap_width > self.car_width:
+                gap_depth = gap_depth / gap_length
+                if gap_depth > max_gap_depth:
+                    max_gap_depth = gap_depth
+                    start_i = self.front_view_end_idx - gap_length
+                    end_i = self.front_view_end_idx
+
+        return start_i, end_i
+
+
     def find_max_gap(self, free_space_ranges):
         """
         Return the start index & end index of the max gap in free_space_ranges
@@ -158,9 +205,9 @@ class ReactiveFollowGap(Node):
         Return index of best point in ranges
 	    Naive: Choose the furthest point within ranges and go there
         """
-        return np.argmax(ranges[start_i:end_i+1]) + start_i
+        # return np.argmax(ranges[start_i:end_i+1]) + start_i
         # Go towards the center of the gap
-        # return (start_i + end_i) // 2
+        return int(start_i*0.55 + 0.45*end_i)
     
 
     def disparity_extending(self, ranges):
@@ -207,13 +254,19 @@ class ReactiveFollowGap(Node):
             self.bubble_extend(virtual_ranges, min_index, False)
 
             #Find max length gap
-            start_i, end_i = self.find_max_gap(virtual_ranges)
-
+            # start_i, end_i = self.find_max_gap(virtual_ranges)
+            # Find deepest valid gap
+            start_i, end_i = self.find_deepest_valid_gap(virtual_ranges)
             #Find the best point in the gap
             best_index = self.find_best_point(start_i, end_i, virtual_ranges)
 
-            # Choose steering angle and velocity
-            angle = self.range_index_to_angle(best_index)
+            if (end_i - start_i) < 5:
+                # means no gap - just go straight
+                angle = 0.0
+            else:
+                # Choose steering angle and velocity
+                angle = self.range_index_to_angle(best_index)
+
             velocity = self.steering_angle_to_velocity_mapping(angle)
 
             if (not self.should_print) and np.abs(angle - self.last_printed_angle) > 0.1:
@@ -227,7 +280,7 @@ class ReactiveFollowGap(Node):
                 print(f"Best Index: {best_index}, Best Value: {virtual_ranges[best_index]}")
                 print("Angle: ", angle)
                 print("Velocity: ", velocity)
-                print("Virtual Ranges: ", virtual_ranges)
+                print("Virtual Ranges: ", virtual_ranges[self.front_view_start_idx:self.front_view_end_idx])
                 print("max virtual_ranges: ", max(virtual_ranges))
             else:
                 self.should_print = False
@@ -236,7 +289,7 @@ class ReactiveFollowGap(Node):
         drive_msg = AckermannDriveStamped()
         drive_msg.header = data.header
         drive_msg.drive.steering_angle = self.lidar_to_steering_angle(angle)
-        drive_msg.drive.speed = velocity
+        drive_msg.drive.speed = velocity #* 0.0
         self.drive_pub.publish(drive_msg)
 
 

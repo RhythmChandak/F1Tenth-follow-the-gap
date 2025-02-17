@@ -1,4 +1,6 @@
 # Lab 4: Follow the Gap
 
 ## YouTube video link
-[FILL ME IN](https://tinyurl.com/22mts2ax)
+[Follow the gap with Levine Hall - no obstacles](https://youtu.be/hT1wYgUTzyw)  
+[Follow the gap with Levine Hall - with obstacles](https://youtu.be/LBaTBtu5JSQ)  
+

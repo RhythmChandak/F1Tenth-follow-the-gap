@@ -31,27 +31,29 @@ class ReactiveFollowGap(Node):
             10
         )
 
-        self.moving_avg_window = 3
+        self.moving_avg_window = 5
         self.max_dist = 10.0 # meters
-        self.bubble_radius = 80 # indices in ranges array
+        self.bubble_radius = 0.25 # meters
         self.min_obs_dist_threshold = 2.0 # meters
         self.disparity_threshold = 0.6 # meters
 
         self.front_view_start_idx = None
         self.front_view_end_idx = None
+        self.angle_increment = None
+        self.angle_min = None
 
     
-    def range_index_to_angle(self, index, data):
+    def range_index_to_angle(self, index):
         """ Convert a given index in the LiDAR data.ranges array to an angle in radians
         """
-        angle = data.angle_min + index * data.angle_increment
+        angle = self.angle_min + index * self.angle_increment
         return angle
     
 
-    def angle_to_index(self, angle, data):
+    def angle_to_index(self, angle):
         """ Convert a given angle in radians to an index in the LiDAR data.ranges array
         """
-        index = (angle - data.angle_min) / data.angle_increment
+        index = (angle - self.angle_min) / self.angle_increment
         return int(index)
     
 
@@ -95,6 +97,27 @@ class ReactiveFollowGap(Node):
 
         return proc_ranges
 
+
+    def bubble_extend(self, ranges, center_idx, extend_value):
+        """ Create a bubble around the LiDAR data
+        """
+        if ranges[center_idx] < self.bubble_radius:
+            return
+
+        dtheta = np.arcsin(self.bubble_radius/ranges[center_idx])
+        d_index = int(dtheta / self.angle_increment)
+        start_idx = center_idx - d_index
+        end_idx = center_idx + d_index
+        if extend_value:
+            for i in range(start_idx, end_idx):
+                if i >= 0 and i < len(ranges):
+                    ranges[i] = min(ranges[i], ranges[center_idx])
+        else:
+            for i in range(start_idx, end_idx):
+                if i >= 0 and i < len(ranges):
+                    ranges[i] = 0.0
+
+
     def find_max_gap(self, free_space_ranges):
         """
         Return the start index & end index of the max gap in free_space_ranges
@@ -103,7 +126,7 @@ class ReactiveFollowGap(Node):
         start_i = 0
         end_i = 0
         gap = 0
-        for i in range(len(free_space_ranges)):
+        for i in range(self.front_view_start_idx, self.front_view_end_idx):
             if free_space_ranges[i] > self.min_obs_dist_threshold:
                 gap += 1
             else:
@@ -115,8 +138,8 @@ class ReactiveFollowGap(Node):
 
         # Check the last gap
         if gap > max_gap:
-            start_i = len(free_space_ranges) - gap
-            end_i = len(free_space_ranges) - 1
+            start_i = self.front_view_end_idx - gap
+            end_i = self.front_view_end_idx
 
         return start_i, end_i
 
@@ -140,10 +163,10 @@ class ReactiveFollowGap(Node):
         virtual_ranges = ranges.copy()
         for i in range(self.front_view_start_idx+1, self.front_view_end_idx):
             if np.abs(ranges[i] - ranges[i-1]) > self.disparity_threshold:
-                virtual_val = min(ranges[i], ranges[i-1])
-                for j in range(i-self.bubble_radius, i+self.bubble_radius):
-                    if j >= 0 and j < len(virtual_ranges):
-                        virtual_ranges[j] = min(ranges[j], virtual_val)
+                if ranges[i] < ranges[i-1]:
+                    self.bubble_extend(virtual_ranges, i, True)
+                else:
+                    self.bubble_extend(virtual_ranges, i-1, True)
         return virtual_ranges
 
 
@@ -153,8 +176,10 @@ class ReactiveFollowGap(Node):
         ranges = data.ranges
         proc_ranges = self.preprocess_lidar(ranges)
 
-        self.front_view_start_idx = self.angle_to_index(-np.radians(90), data)
-        self.front_view_end_idx = self.angle_to_index(np.radians(90), data)
+        self.angle_increment = data.angle_increment
+        self.angle_min = data.angle_min
+        self.front_view_start_idx = self.angle_to_index(-np.radians(90))
+        self.front_view_end_idx = self.angle_to_index(np.radians(90))
 
         # Extend disparities
         virtual_ranges = self.disparity_extending(proc_ranges)
@@ -170,9 +195,7 @@ class ReactiveFollowGap(Node):
         angle = 0.0
         velocity = self.steering_angle_to_velocity_mapping(angle)
         if min_value != self.max_dist:
-            for i in range(min_index-self.bubble_radius, min_index+self.bubble_radius):
-                if i >= 0 and i < len(virtual_ranges):
-                    virtual_ranges[i] = 0.0
+            self.bubble_extend(virtual_ranges, min_index, False)
 
             #Find max length gap
             start_i, end_i = self.find_max_gap(virtual_ranges)
@@ -181,7 +204,7 @@ class ReactiveFollowGap(Node):
             best_index = self.find_best_point(start_i, end_i, virtual_ranges)
 
             # Choose steering angle and velocity
-            angle = self.range_index_to_angle(best_index, data)
+            angle = self.range_index_to_angle(best_index)
             velocity = self.steering_angle_to_velocity_mapping(angle)
 
         #Publish Drive message

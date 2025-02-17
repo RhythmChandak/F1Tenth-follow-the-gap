@@ -31,18 +31,22 @@ class ReactiveFollowGap(Node):
             10
         )
 
-        self.moving_avg_window = 5
-        self.max_dist = 10.0 # meters
-        self.bubble_radius = 0.35 # meters
+        self.moving_avg_window = 3
+        self.max_dist = 5.0 # meters
+        self.bubble_radius = 0.20 # meters
         self.min_obs_dist_threshold = 2.0 # meters
-        self.disparity_threshold = 0.6 # meters
+        self.disparity_threshold = 0.5 # meters
 
         self.front_view_start_idx = None
         self.front_view_end_idx = None
         self.angle_increment = None
         self.angle_min = None
 
-    
+        # For debugging
+        self.last_printed_angle = 0.0
+        self.should_print = False
+
+
     def range_index_to_angle(self, index):
         """ Convert a given index in the LiDAR data.ranges array to an angle in radians
         """
@@ -76,6 +80,7 @@ class ReactiveFollowGap(Node):
         """
         # As need to map lidar angle from -90 to 90 to steering angle from -45 to 45.
         return lidar_angle / 2.0
+
 
     def preprocess_lidar(self, ranges):
         """ Preprocess the LiDAR scan array. Expert implementation includes:
@@ -112,6 +117,10 @@ class ReactiveFollowGap(Node):
             for i in range(start_idx, end_idx):
                 if i >= 0 and i < len(ranges):
                     ranges[i] = min(ranges[i], ranges[center_idx])
+
+            if self.should_print:
+                print("Disparity extended from ", start_idx, " to ", end_idx)
+                print(f"Center Index: {center_idx}, Center Value: {ranges[center_idx]}")
         else:
             for i in range(start_idx, end_idx):
                 if i >= 0 and i < len(ranges):
@@ -123,8 +132,8 @@ class ReactiveFollowGap(Node):
         Return the start index & end index of the max gap in free_space_ranges
         """
         max_gap = 0
-        start_i = 0
-        end_i = 0
+        start_i = self.front_view_start_idx
+        end_i = self.front_view_start_idx
         gap = 0
         for i in range(self.front_view_start_idx, self.front_view_end_idx):
             if free_space_ranges[i] > self.min_obs_dist_threshold:
@@ -149,9 +158,9 @@ class ReactiveFollowGap(Node):
         Return index of best point in ranges
 	    Naive: Choose the furthest point within ranges and go there
         """
-        # return np.argmax(ranges[start_i:end_i+1]) + start_i
+        return np.argmax(ranges[start_i:end_i+1]) + start_i
         # Go towards the center of the gap
-        return (start_i + end_i) // 2
+        # return (start_i + end_i) // 2
     
 
     def disparity_extending(self, ranges):
@@ -206,6 +215,22 @@ class ReactiveFollowGap(Node):
             # Choose steering angle and velocity
             angle = self.range_index_to_angle(best_index)
             velocity = self.steering_angle_to_velocity_mapping(angle)
+
+            if (not self.should_print) and np.abs(angle - self.last_printed_angle) > 0.1:
+                self.should_print = True
+                print(angle - self.last_printed_angle)
+                self.last_printed_angle = angle
+                print("Front View Start Index: ", self.front_view_start_idx)
+                print("Front View End Index: ", self.front_view_end_idx)
+                print("Start Index: ", start_i)
+                print("End Index: ", end_i)
+                print(f"Best Index: {best_index}, Best Value: {virtual_ranges[best_index]}")
+                print("Angle: ", angle)
+                print("Velocity: ", velocity)
+                print("Virtual Ranges: ", virtual_ranges)
+                print("max virtual_ranges: ", max(virtual_ranges))
+            else:
+                self.should_print = False
 
         #Publish Drive message
         drive_msg = AckermannDriveStamped()

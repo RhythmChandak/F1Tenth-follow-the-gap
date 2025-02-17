@@ -33,7 +33,7 @@ class ReactiveFollowGap(Node):
 
         self.moving_avg_window = 5
         self.max_dist = 10.0 # meters
-        self.bubble_radius = 0.25 # meters
+        self.bubble_radius = 0.35 # meters
         self.min_obs_dist_threshold = 2.0 # meters
         self.disparity_threshold = 0.6 # meters
 
@@ -61,13 +61,13 @@ class ReactiveFollowGap(Node):
         """ Simple mapping between steering angle and velocity
         """
         # Convert steering angle to safe speed
-        curr_velocity = 5.0
+        curr_velocity = 1.2
         if np.abs(angle) < np.radians(10):
-            curr_velocity = 4.0
+            curr_velocity = 1.1
         elif np.abs(angle) < np.radians(20):
-            curr_velocity = 3.0
+            curr_velocity = 1.1
         else:
-            curr_velocity = 2.0
+            curr_velocity = 1.1
         return curr_velocity
     
     

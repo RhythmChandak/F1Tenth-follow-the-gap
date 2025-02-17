@@ -32,7 +32,7 @@ class ReactiveFollowGap(Node):
         )
 
         self.moving_avg_window = 1
-        self.max_dist = 5.0 # meters
+        self.max_dist = 6.0 # meters
         self.car_length = 0.50 # meters
         self.car_width = 0.25 # meters
         self.bubble_radius = 0.18 # meters
@@ -43,10 +43,6 @@ class ReactiveFollowGap(Node):
         self.front_view_end_idx = None
         self.angle_increment = None
         self.angle_min = None
-
-        # For debugging
-        self.last_printed_angle = -10.0
-        self.should_print = False
 
 
     def range_index_to_angle(self, index):
@@ -61,6 +57,44 @@ class ReactiveFollowGap(Node):
         """
         index = (angle - self.angle_min) / self.angle_increment
         return int(index)
+
+    
+    def velocity_mapping(self, angle, gap_depth):
+        """
+        Map the angle and gap depth to a velocity.
+        First map the gap depth to velocity using stepwise linear function.
+        Then adjust the velocity based on the steering angle.
+        """
+        velocity_min = 1.0
+        velocity_max = 4.0
+        
+        gap_depth_step1 = 2.0
+        velocity_step1 = 2.0 
+
+        gap_depth_step2 = 3.5
+        velocity_step2 = 3.0
+
+        gap_depth_step3 = 5.0
+        velocity_step3 = velocity_max
+
+        # Map gap depth to velocity
+        velocity = velocity_max
+        if gap_depth < gap_depth_step1:
+            velocity = velocity_min
+        elif gap_depth < gap_depth_step2:
+            velocity = velocity_step1 + (gap_depth - gap_depth_step1) * (velocity_step2 - velocity_step1) / (gap_depth_step2 - gap_depth_step1)
+        elif gap_depth < gap_depth_step3:
+            velocity = velocity_step2 + (gap_depth - gap_depth_step2) * (velocity_step3 - velocity_step2) / (gap_depth_step3 - gap_depth_step2)
+        else:
+            velocity = velocity_step3
+
+        # Adjust velocity based on steering angle
+        if np.abs(angle) > np.radians(20):
+            velocity *= 0.5
+        elif np.abs(angle) > np.radians(10):
+            velocity *= 0.75
+
+        return velocity
     
 
     def steering_angle_to_velocity_mapping(self, angle):
@@ -254,7 +288,8 @@ class ReactiveFollowGap(Node):
                 # Choose steering angle and velocity
                 angle = self.range_index_to_angle(best_index)
 
-            velocity = self.steering_angle_to_velocity_mapping(angle)
+            # velocity = self.steering_angle_to_velocity_mapping(angle)
+            velocity = self.velocity_mapping(angle, virtual_ranges[best_index])
 
         #Publish Drive message
         drive_msg = AckermannDriveStamped()

@@ -1,7 +1,6 @@
 # Follow the gap for F1Tenth Autonomous Racing- A reactive algorithm for obstacle avoidance
 
 ### Outline of the algorithm
-The lecture slides on F1TENTH Follow the gap is the best visual resource for understanding every step of the algorithm. However, the steps are outlined over here:
 
 1. Obtain laser scans and preprocess them.
 2. Find the closest point in the LiDAR ranges array.

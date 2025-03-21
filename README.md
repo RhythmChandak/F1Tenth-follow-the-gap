@@ -10,5 +10,7 @@ The lecture slides on F1TENTH Follow the gap is the best visual resource for und
 5. Find the best goal point in this gap. Naively, this could be the furthest point away in your gap, but you can probably go faster if you follow the “Better Idea” method as described in lecture.
 6. Actuate the car to move towards this goal point by publishing an `AckermannDriveStamped` to the /drive topic.
 
-Video of car working on obstacles map in simulation:  
-[![Follow the gap in simulation](https://img.youtube.com/vi/EbQzXgSm7rY/0.jpg)](https://www.youtube.com/watch?v=EbQzXgSm7rY)
+Video of car working on obstacles map in simulation: https://www.youtube.com/watch?v=EbQzXgSm7rY  
+
+https://github.com/user-attachments/assets/69e53f82-00d2-474a-bc0f-cce9f9f5140f
+
